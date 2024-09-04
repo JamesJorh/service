@@ -6,9 +6,11 @@ import socketserver
 import requests
 import logging
 import appdirs
+import subprocess
 from PyQt6.QtWidgets import QApplication, QMainWindow, QPushButton, QVBoxLayout, QWidget, QLabel, QProgressBar, \
-    QMessageBox
-from PyQt6.QtCore import QThread, pyqtSignal, QTimer
+    QMessageBox, QStyle
+from PyQt6.QtCore import QThread, pyqtSignal, QTimer, QSize, PYQT_VERSION_STR
+from PyQt6.QtGui import QIcon
 
 # Set up logging
 logging.basicConfig(filename='app_log.txt', level=logging.DEBUG,
@@ -84,7 +86,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         logging.info("Initializing MainWindow")
         try:
-            self.setWindowTitle(f"{APP_NAME} - 本地更新示例")
+            self.setWindowTitle(f"{APP_NAME} - 自动更新示例")
             self.setGeometry(100, 100, 300, 200)
 
             layout = QVBoxLayout()
@@ -92,13 +94,8 @@ class MainWindow(QMainWindow):
             self.version_label = QLabel(f"当前版本: {VERSION}")
             layout.addWidget(self.version_label)
 
-            self.check_update_button = QPushButton("检查更新")
-            self.check_update_button.clicked.connect(self.check_update)
-            layout.addWidget(self.check_update_button)
-
-            self.update_button = QPushButton("下载更新")
-            self.update_button.clicked.connect(self.download_update)
-            self.update_button.setVisible(False)
+            self.update_button = QPushButton("检查更新")
+            self.update_button.clicked.connect(self.handle_update_button)
             layout.addWidget(self.update_button)
 
             self.progress_bar = QProgressBar()
@@ -115,6 +112,14 @@ class MainWindow(QMainWindow):
 
             # Wait for the server to start and emit the port
             QTimer.singleShot(1000, self.check_server_started)
+
+            # Automatically check for updates when the app starts
+            QTimer.singleShot(2000, self.check_update)
+
+            self.update_available = False
+
+            # Print PyQt version for debugging
+            print(f"PyQt version: {PYQT_VERSION_STR}")
 
             logging.info("MainWindow initialization complete")
         except Exception as e:
@@ -140,13 +145,27 @@ class MainWindow(QMainWindow):
             latest_version = update_info.get('version')
             if latest_version and self.compare_versions(latest_version, VERSION) > 0:
                 self.version_label.setText(f"当前版本: {VERSION}\n可用更新: {latest_version}")
-                self.update_button.setVisible(True)
-                QMessageBox.information(self, "更新可用", f"发现新版本: {latest_version}")
+                self.update_available = True
+                self.update_button.setText("更新可用")
+                self.set_update_icon()
             else:
-                QMessageBox.information(self, "无可用更新", "您的应用程序已是最新版本。")
+                self.update_available = False
+                self.update_button.setText("检查更新")
+                self.update_button.setIcon(QIcon())  # 移除图标
         except Exception as e:
             logging.error(f"Error checking for updates: {e}")
-            QMessageBox.critical(self, "错误", f"检查更新时发生错误: {str(e)}")
+
+    def set_update_icon(self):
+        icon_path = os.path.join(os.path.dirname(__file__), "red_dot.png")
+        if os.path.exists(icon_path):
+            icon = QIcon(icon_path)
+            self.update_button.setIcon(icon)
+            self.update_button.setIconSize(QSize(16, 16))
+            logging.info(f"Update icon set from: {icon_path}")
+        else:
+            logging.warning(f"Icon file not found: {icon_path}")
+            # 使用系统内置图标作为备选
+            self.update_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserReload))
 
     def compare_versions(self, version1, version2):
         v1_parts = [int(x) for x in version1.split('.')]
@@ -159,6 +178,12 @@ class MainWindow(QMainWindow):
             elif v1 < v2:
                 return -1
         return 0
+
+    def handle_update_button(self):
+        if self.update_available:
+            self.download_update()
+        else:
+            self.check_update()
 
     def download_update(self):
         if UPDATE_URL is None:
@@ -187,10 +212,7 @@ class MainWindow(QMainWindow):
         logging.info(f"Download finished: {file_name}")
         self.progress_bar.setVisible(False)
         self.update_button.setEnabled(True)
-        self.update_button.setText("安装更新")
-        self.update_button.clicked.disconnect()
-        self.update_button.clicked.connect(lambda: self.install_update(file_name))
-        QMessageBox.information(self, "下载完成", f"更新已下载到: {file_name}")
+        self.install_update(file_name)
 
     def download_error(self, error_message):
         logging.error(f"Download error: {error_message}")
@@ -199,11 +221,15 @@ class MainWindow(QMainWindow):
         QMessageBox.critical(self, "下载错误", f"下载更新时发生错误: {error_message}")
 
     def install_update(self, file_name):
-        # 这里应该实现实际的安装逻辑
         logging.info(f"Installing update from {file_name}")
-        QMessageBox.information(self, "安装更新", f"正在安装更新: {file_name}\n（实际安装逻辑尚未实现）")
-        self.version_label.setText(f"更新已安装。请重启应用程序。")
-        self.update_button.setEnabled(False)
+        try:
+            # 启动新的exe
+            subprocess.Popen([file_name])
+            # 关闭当前程序
+            sys.exit(0)
+        except Exception as e:
+            logging.error(f"Error installing update: {e}")
+            QMessageBox.critical(self, "安装错误", f"安装更新时发生错误: {str(e)}")
 
 
 if __name__ == "__main__":
